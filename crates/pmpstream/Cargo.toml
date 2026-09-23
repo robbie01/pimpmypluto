@@ -1,0 +1,9 @@
+[package]
+name = "pmpstream"
+version = "0.1.0"
+edition = "2021"
+description = "Host library for pimpmypluto radios over USB (pmpstream protocol)"
+
+[dependencies]
+pmp-proto = { path = "../pmp-proto" }
+nusb = "0.2"

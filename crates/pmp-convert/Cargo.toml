@@ -1,0 +1,8 @@
+[package]
+name = "pmp-convert"
+version = "0.1.0"
+edition = "2021"
+description = "Sample format conversion between pmpstream wire formats and native int16 I/Q"
+
+[dependencies]
+pmp-proto = { path = "../pmp-proto" }

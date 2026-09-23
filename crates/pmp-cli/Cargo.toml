@@ -1,0 +1,14 @@
+[package]
+name = "pmp-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line front end for pimpmypluto radios"
+
+[[bin]]
+name = "pmp"
+path = "src/main.rs"
+
+[dependencies]
+pmpstream = { path = "../pmpstream" }
+pmp-convert = { path = "../pmp-convert" }
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,10 @@
+# Device code is cross-compiled with zig as the C compiler and linker, the same
+# toolchain the rest of the userland uses.  No sysroot, no VM.
+[target.armv7-unknown-linux-musleabihf]
+linker = "tools/zcc"
+# link-self-contained=no: zig supplies crt1/libc/libunwind; rustc must not add its own copies too.
+rustflags = ["-C", "target-cpu=cortex-a9", "-C", "target-feature=+crt-static", "-C", "link-self-contained=no"]
+
+[env]
+CC_armv7_unknown_linux_musleabihf = { value = "tools/zcc", relative = true }
+AR_armv7_unknown_linux_musleabihf = { value = "tools/zar", relative = true }

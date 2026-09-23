@@ -1,0 +1,171 @@
+#!/bin/sh
+# PID 1.  Deliberately a short shell script: everything the device does at boot
+# is readable here, top to bottom.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+/bin/busybox --install -s
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+mount -t devpts   devpts   /dev/pts
+mount -t tmpfs    tmpfs    /tmp
+mount -t tmpfs    tmpfs    /run
+mount -t configfs configfs /sys/kernel/config
+mount -t debugfs  debugfs  /sys/kernel/debug 2>/dev/null
+
+log() { echo "pmp: $*" > /dev/kmsg; }
+
+# ------------------------------------------------------------ identity ----
+# The QSPI flash's factory unique ID is the device serial, in the same 17-byte
+# form stock firmware reports, so a host sees one serial number (and, below,
+# one MAC address) whichever firmware is running.  Stock's form is an artefact
+# of ADI's driver, reproduced here rather than understood: it clocks 20 bytes
+# out of the flash's Read Unique ID command with no dummy phase -- four zero
+# bytes, then the 8-byte ID repeating -- XORs each byte with its index, and
+# keeps bytes 3..19.  Checked against this board's stock serial.
+id=$(cat /sys/bus/spi/devices/spi*/spi-nor/unique_id 2>/dev/null | head -1)
+serial=
+if [ ${#id} -eq 16 ]; then
+    raw="00000000$id$id$id"
+    i=3
+    while [ $i -lt 20 ]; do
+        serial="$serial$(printf %02x $(( 0x$(echo "$raw" | cut -c$((i * 2 + 1))-$((i * 2 + 2))) ^ i )))"
+        i=$((i + 1))
+    done
+fi
+[ -n "$serial" ] || serial=0000000000000000
+echo "$serial" > /run/serial
+short=$(echo "$serial" | tail -c 5)
+name="pluto-$short"
+hostname "$name"
+echo "127.0.0.1 localhost $name" > /etc/hosts
+
+# ------------------------------------------------------------- network ----
+# IPv6 link-local only.  No DHCP, no addresses to configure or collide: the
+# host finds the radio by mDNS (or `ping6 ff02::1%iface`).  MACs are derived
+# from the serial exactly as stock does, so the host keeps seeing one
+# consistent network interface across firmwares and reboots.
+sha=$(echo "$serial" | sha1sum)
+mac() { echo "$1$(echo "$sha" | cut -c$2 | sed 's/../:&/g')"; }
+host_mac=$(mac 00:E0:22 1-6)
+dev_mac=$(mac 00:05:F7 7-12)
+
+G=/sys/kernel/config/usb_gadget/pmp
+mkdir -p $G/strings/0x409 $G/configs/c.1/strings/0x409
+# pid.codes test PID; request a real one before anybody else runs this.
+echo 0x1209 > $G/idVendor
+echo 0x0001 > $G/idProduct
+echo 0x0100 > $G/bcdDevice
+echo "pimpmypluto"          > $G/strings/0x409/manufacturer
+echo "PlutoSDR (pimped)"    > $G/strings/0x409/product
+echo "$serial"              > $G/strings/0x409/serialnumber
+echo "NCM + SDR"            > $G/configs/c.1/strings/0x409/configuration
+echo 500                    > $G/configs/c.1/MaxPower
+
+mkdir -p $G/functions/ncm.usb0
+echo "$host_mac" > $G/functions/ncm.usb0/host_addr
+echo "$dev_mac"  > $G/functions/ncm.usb0/dev_addr
+ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+
+# pmpstream: the vendor bulk interface, implemented by sdrd through FunctionFS.
+mkdir -p $G/functions/ffs.pmp /dev/pmp-ffs
+ln -s $G/functions/ffs.pmp $G/configs/c.1/
+mount -t functionfs pmp /dev/pmp-ffs
+
+udc=$(ls /sys/class/udc | head -1)
+bind_gadget() {
+    echo "$udc" > $G/UDC || { log "gadget bind to '$udc' failed"; return 1; }
+    echo 0 > /proc/sys/net/ipv6/conf/usb0/accept_ra 2>/dev/null
+    ip link set usb0 up
+}
+ip link set lo up
+
+# --------------------------------------------------------------- radio ----
+for m in /lib/modules/pmpstream.ko; do
+    [ -e "$m" ] && { insmod "$m" || log "insmod $m failed"; }
+done
+
+# The device tree describes the AD936x truthfully and no kernel driver claims
+# it; hand it to spidev so the userspace driver can.
+if [ -d /sys/bus/spi/devices/spi0.0 ] && [ ! -e /sys/bus/spi/devices/spi0.0/driver ]; then
+    echo spidev > /sys/bus/spi/devices/spi0.0/driver_override
+    echo spi0.0 > /sys/bus/spi/drivers/spidev/bind || log "spidev bind failed"
+fi
+
+# ---------------------------------------------------------------- sdrd ----
+# A FunctionFS gadget can only bind once its daemon has written descriptors,
+# and unbinds when the daemon exits -- so PID 1 supervises the pair: start
+# sdrd, wait for it to be ready, bind; when it dies, unbind and go again.
+# sdrd also owns the hardware watchdog: it stops feeding it if the sample
+# datapath wedges, and if sdrd itself stays dead the board resets too.
+supervise_sdrd() {
+    while :; do
+        rm -f /run/sdrd.ready
+        # /etc/pmp-fake-rx: bug-hunting image, RX stream is synthetic (mkimage --fake-rx)
+        sdrd serve /dev/pmp-ffs $([ -e /etc/pmp-fake-rx ] && echo --fake-rx) 2>/dev/kmsg &
+        pid=$!
+        n=0
+        while [ ! -e /run/sdrd.ready ] && kill -0 $pid 2>/dev/null && [ $n -lt 80 ]; do
+            sleep 0.1; n=$((n + 1))
+        done
+        if [ -e /run/sdrd.ready ]; then
+            bind_gadget
+            wait $pid
+            log "sdrd exited ($?), restarting"
+            echo "" > $G/UDC 2>/dev/null
+        else
+            # Not ready in 8 s.  Keep trying: if it never comes back, nothing
+            # feeds the watchdog and the board resets, which is the recovery.
+            kill -9 $pid 2>/dev/null
+            wait $pid 2>/dev/null
+            log "sdrd did not become ready (exit $?); retrying"
+        fi
+        sleep 1
+    done
+}
+# /etc/pmp-no-serve: diagnostic images that want the radio to themselves.
+serve=; [ -x /usr/bin/sdrd ] && [ ! -e /etc/pmp-no-serve ] && serve=1
+[ -n "$serve" ] && supervise_sdrd &
+n=0
+while [ -n "$serve" ] && [ ! -e /run/sdrd.ready ] && [ $n -lt 90 ]; do
+    sleep 0.1; n=$((n + 1))
+done
+if [ ! -e /run/sdrd.ready ]; then
+    # No radio daemon: still come up on the network so it can be debugged.
+    log "sdrd not ready; bringing up NCM only"
+    rm -f $G/configs/c.1/ffs.pmp
+    bind_gadget
+    [ -c /dev/watchdog ] && watchdog -t 5 -T 30 /dev/watchdog
+fi
+
+# ------------------------------------------------------------ services ----
+version=$(cat /etc/pmp-version)
+mdnsd usb0 "$name" pluto -- _pimpmypluto._tcp:7373 _ssh._tcp:22 -- \
+    "serial=$serial" "fw=$version" &
+dropbear -R -s -p 22 2>/dev/null
+
+# Development failsafe: an image that cannot reach its host is a brick until
+# someone replugs it.  If no host has configured the gadget shortly after boot,
+# go back to U-Boot's RAM-DFU mode, where the next image can be loaded.
+if [ -e /etc/pmp-dev ]; then
+    ( sleep 25
+      [ "$(cat /sys/class/udc/*/state 2>/dev/null)" = configured ] && exit 0
+      echo "pmp: no USB host after 25 s, returning to DFU" > /dev/kmsg
+      # Leave evidence for tools/lastlog.py: who bound, who deferred.
+      { echo "deferred: $(cat /sys/kernel/debug/devices_deferred 2>&1)"
+        for d in /sys/bus/platform/devices/*usb* /sys/bus/platform/devices/ci_hdrc* /sys/bus/platform/devices/phy0 /sys/bus/ulpi/devices/*; do
+            [ -e "$d" ] || continue
+            echo "$d -> $(basename "$(readlink "$d/driver" 2>/dev/null)")"
+        done
+        echo "udc: $(ls /sys/class/udc 2>&1)"
+      } | while read -r l; do echo "pmp: $l" > /dev/kmsg; done
+      reboot-to ram ) &
+fi
+
+log "up: $name fw=$version kernel=$(uname -r)"
+
+# Serial console shell, respawned forever; PID 1 must never exit.
+while :; do
+    setsid cttyhack sh -l </dev/ttyPS0 >/dev/ttyPS0 2>&1 || sleep 5
+done

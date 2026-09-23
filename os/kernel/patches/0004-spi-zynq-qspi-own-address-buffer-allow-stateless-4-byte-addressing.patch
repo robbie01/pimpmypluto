@@ -1,0 +1,50 @@
+--- a/drivers/spi/spi-zynq-qspi.c
++++ b/drivers/spi/spi-zynq-qspi.c
+@@ -228,10 +228,19 @@
+ 	if (!spi_mem_default_supports_op(mem, op))
+ 		return false;
+ 
++	if (op->addr.nbytes > 4)
++		return false;
++
+ 	/*
+-	 * The number of address bytes should be equal to or less than 3 bytes.
++	 * pimpmypluto: 4-byte addresses are fine, the flash *modes* that some
++	 * parts need for them are not.  "Enter 4-byte address mode" and the
++	 * extended address register both survive a warm reset, and the Zynq
++	 * BootROM, which knows neither, then cannot read its boot image until
++	 * the board is power cycled.  Refuse them here, where nothing above can
++	 * forget to ask: spi-nor then fails to probe a part that has no
++	 * dedicated 4-byte opcodes, instead of endangering the next boot.
+ 	 */
+-	if (op->addr.nbytes > 3)
++	if (op->cmd.opcode == 0xb7 || op->cmd.opcode == 0xc5)
+ 		return false;
+ 
+ 	return true;
+@@ -528,6 +537,7 @@
+ 	struct zynq_qspi *xqspi = spi_controller_get_devdata(mem->spi->controller);
+ 	int err = 0, i;
+ 	u8 *tmpbuf;
++	u8 addrbuf[4];
+ 
+ 	zynq_qspi_chipselect(mem->spi, true);
+ 	zynq_qspi_config_op(xqspi, mem->spi, op);
+@@ -547,10 +557,16 @@
+ 	}
+ 
+ 	if (op->addr.nbytes) {
++		/*
++		 * Into a buffer of our own: txbuf still points at op->cmd.opcode
++		 * here, and writing the address there scribbled over the rest of
++		 * the caller's (const) op.
++		 */
+ 		for (i = 0; i < op->addr.nbytes; i++) {
+-			xqspi->txbuf[i] = op->addr.val >>
++			addrbuf[i] = op->addr.val >>
+ 					(8 * (op->addr.nbytes - i - 1));
+ 		}
++		xqspi->txbuf = addrbuf;
+ 
+ 		reinit_completion(&xqspi->data_completion);
+ 		xqspi->rxbuf = NULL;

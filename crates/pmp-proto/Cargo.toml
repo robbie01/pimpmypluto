@@ -1,0 +1,5 @@
+[package]
+name = "pmp-proto"
+version = "0.1.0"
+edition = "2021"
+description = "pmpstream USB wire protocol: constants and message layouts shared by device and host"

@@ -1,0 +1,40 @@
+--- a/drivers/mtd/spi-nor/sysfs.c	2026-09-21 09:29:40
++++ b/drivers/mtd/spi-nor/sysfs.c	2026-09-21 09:29:40
+@@ -42,7 +42,37 @@
+ }
+ static DEVICE_ATTR_RO(jedec_id);
+ 
++/*
++ * pimpmypluto: the flash's factory-programmed 64-bit unique ID (Winbond and
++ * compatible: opcode 4Bh, four dummy bytes).  Boards with no serial EEPROM
++ * use it as their serial number.
++ */
++static ssize_t unique_id_show(struct device *dev,
++			      struct device_attribute *attr, char *buf)
++{
++	struct spi_device *spi = to_spi_device(dev);
++	struct spi_mem *spimem = spi_get_drvdata(spi);
++	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
++	struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(0x4b, 0),
++					  SPI_MEM_OP_NO_ADDR,
++					  SPI_MEM_OP_DUMMY(4, 0),
++					  SPI_MEM_OP_DATA_IN(8, nor->bouncebuf, 0));
++	int ret;
++
++	spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
++	ret = spi_nor_prep_and_lock(nor);
++	if (ret)
++		return ret;
++	ret = spi_mem_exec_op(nor->spimem, &op);
++	if (!ret)
++		ret = sysfs_emit(buf, "%*phN\n", 8, nor->bouncebuf);
++	spi_nor_unlock_and_unprep(nor);
++	return ret;
++}
++static DEVICE_ATTR_RO(unique_id);
++
+ static struct attribute *spi_nor_sysfs_entries[] = {
++	&dev_attr_unique_id.attr,
+ 	&dev_attr_manufacturer.attr,
+ 	&dev_attr_partname.attr,
+ 	&dev_attr_jedec_id.attr,

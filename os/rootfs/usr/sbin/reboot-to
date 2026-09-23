@@ -1,0 +1,24 @@
+#!/bin/sh
+# Reboot into one of U-Boot's modes by leaving a code in the Zynq's
+# REBOOT_STATUS register, which survives a soft reset.  This is the same
+# contract stock firmware's device_reboot uses; U-Boot reads it in `qspiboot`.
+case "$1" in
+    ram)     code=7 ;;   # DFU into RAM, then boot that image (touches no flash)
+    sf)      code=3 ;;   # DFU into QSPI flash (firmware update / restore stock)
+    verbose) code=6 ;;   # normal boot, chatty serial console
+    break)   code=2 ;;   # stop at the U-Boot prompt
+    reset)   code=0 ;;
+    *) echo "usage: reboot-to {ram|sf|verbose|break|reset}" >&2; exit 1 ;;
+esac
+
+# U-Boot compares the *whole* register against 0x0048000N: POR flag (bit 22),
+# soft-reset flag (bit 19, set by the reset we are about to cause) and the code.
+# Reset-reason flags are sticky, so after e.g. a watchdog reset (bit 16) a
+# write of just the code bits never matches and the board boots normally
+# instead.  Write the full value: POR flag + code, everything else cleared.
+devmem 0xF8000008 32 0xDF0D                              # SLCR unlock
+devmem 0xF8000258 32 $((0x00400000 | code))              # REBOOT_STATUS
+sync
+# Detach and delay, so an ssh session that asked for this gets to close cleanly
+# instead of hanging on a link that vanished under it.
+(sleep 1; reboot -f) </dev/null >/dev/null 2>&1 &

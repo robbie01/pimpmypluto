@@ -1,0 +1,58 @@
+--- a/arch/arm/mach-zynq/slcr.c
++++ b/arch/arm/mach-zynq/slcr.c
+@@ -19,6 +19,10 @@
+ #define SLCR_REBOOT_STATUS_OFFSET	0x258 /* PS Reboot Status */
+ #define SLCR_PSS_IDCODE			0x530 /* PS IDCODE */
+ #define SLCR_L2C_RAM			0xA1C /* L2C_RAM in AR#54190 */
++#define SLCR_DDRIOB_DRIVE_SLEW_ADDR	0xB5C /* DDR IOB drive strength / slew rate: */
++#define SLCR_DDRIOB_DRIVE_SLEW_DATA	0xB60 /*   address+command, data, strobe (DQS), */
++#define SLCR_DDRIOB_DRIVE_SLEW_DIFF	0xB64 /*   clock pin groups */
++#define SLCR_DDRIOB_DRIVE_SLEW_CLOCK	0xB68
+ 
+ #define SLCR_UNLOCK_MAGIC		0xDF0D
+ #define SLCR_A9_CPU_CLKSTOP		0x10
+@@ -194,6 +198,7 @@
+ int __init zynq_early_slcr_init(void)
+ {
+ 	struct device_node *np;
++	u32 val;
+ 
+ 	np = of_find_compatible_node(NULL, NULL, "xlnx,zynq-slcr");
+ 	if (!np) {
+@@ -222,6 +227,36 @@
+ 	/* See AR#54190 design advisory */
+ 	regmap_update_bits(zynq_slcr_regmap, SLCR_L2C_RAM, 0x70707, 0x20202);
+ 
++	/*
++	 * pimpmypluto: let a board override the DDR I/O pins' drive strength
++	 * and slew rate, which the FSBL programmed long before us.  Boards
++	 * whose layout does not suit Xilinx's default edge rates misbehave in
++	 * ways that look like software: too-fast address edges made the DRAM
++	 * mis-sample a column line during writes (a burst landing 0x100 bytes
++	 * away, under any OS); too-fast data/strobe edges are the leading
++	 * suspect for the CPU executing garbage under heavy DMA.  This is the
++	 * earliest point at which Linux can do anything about either.
++	 */
++	{
++		static const struct { const char *prop, *what; u32 reg; } ddriob[] = {
++			{ "pmp,ddriob-drive-slew-addr",  "address", SLCR_DDRIOB_DRIVE_SLEW_ADDR },
++			{ "pmp,ddriob-drive-slew-data",  "data",    SLCR_DDRIOB_DRIVE_SLEW_DATA },
++			{ "pmp,ddriob-drive-slew-diff",  "strobe",  SLCR_DDRIOB_DRIVE_SLEW_DIFF },
++			{ "pmp,ddriob-drive-slew-clock", "clock",   SLCR_DDRIOB_DRIVE_SLEW_CLOCK },
++		};
++		int i;
++
++		for (i = 0; i < ARRAY_SIZE(ddriob); i++) {
++			u32 was = 0;
++
++			if (of_property_read_u32(np, ddriob[i].prop, &val))
++				continue;
++			regmap_read(zynq_slcr_regmap, ddriob[i].reg, &was);
++			regmap_write(zynq_slcr_regmap, ddriob[i].reg, val);
++			pr_info("DDR %s pins: drive/slew 0x%08x -> 0x%08x\n", ddriob[i].what, was, val);
++		}
++	}
++
+ 	register_restart_handler(&zynq_slcr_restart_nb);
+ 
+ 	pr_info("%pOFn mapped to %p\n", np, zynq_slcr_base);

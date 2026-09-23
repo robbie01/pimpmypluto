@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * PlutoSDR-compatible board (Zynq 7010 CLG400 clone, AD9363, 512 MB, W25Q256)
+ * for a mainline kernel.
+ *
+ * Describes hardware only.  Nothing here binds an ADI driver: the AD936x is
+ * reached through spidev (bound by /init with driver_override), the converter
+ * cores' registers through UIO, and the sample DMA through pmpstream.
+ */
+/dts-v1/;
+#include "zynq-7000.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+/ {
+	model = "pimpmypluto PlutoSDR (Z7010/AD9363)";
+	compatible = "pmp,pluto", "xlnx,zynq-7000";
+
+	aliases {
+		serial0 = &uart1;
+		spi0 = &spi0;
+		spi1 = &qspi;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x20000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* Console log that survives a warm reset.  A board with no
+		 * serial header wired up has no other way to say why it
+		 * died; tools/lastlog.py reads this back. */
+		ramoops@1bf00000 {
+			compatible = "ramoops";
+			reg = <0x1bf00000 0x00100000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			pmsg-size = <0x10000>;
+		};
+	};
+
+	usb_phy0: phy0 {
+		compatible = "usb-nop-xceiv";
+		#phy-cells = <0>;
+		reset-gpios = <&gpio0 46 GPIO_ACTIVE_LOW>;
+	};
+
+	/* 40 MHz reference into the AD9363 */
+	ad936x_refclk: clock-ad936x-ref {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <40000000>;
+	};
+
+	/* Programmable logic, as laid out by the stock (ADI-derived) bitstream. */
+	fpga_axi: fpga-axi@0 {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* axi_ad9361: ADC core at +0, DAC core at +0x4000 */
+		uio-ad9361@79020000 {
+			compatible = "generic-uio";
+			reg = <0x79020000 0x6000>;
+		};
+
+		/* ADI axi_dmac cores, driven by mainline's dma-axi-dmac. */
+		rx_dma: dma-controller@7c400000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x7c400000 0x1000>;
+			#dma-cells = <1>;
+			interrupt-parent = <&intc>;
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clkc 16>;
+		};
+
+		tx_dma: dma-controller@7c420000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x7c420000 0x1000>;
+			#dma-cells = <1>;
+			interrupt-parent = <&intc>;
+			interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clkc 16>;
+		};
+	};
+
+	/* os/kernel/pmpstream: /dev/pmp-tx, /dev/pmp-rx */
+	sample-streams {
+		compatible = "pmp,stream";
+		dmas = <&tx_dma 0>, <&rx_dma 0>;
+		dma-names = "tx", "rx";
+		/* axi_ad9361 ADC core: pmpstream gates its DMA channels around
+		 * RX starts.  A property, not reg: the region is UIO's. */
+		pmp,adc-core = <0x79020000>;
+	};
+};
+
+/*
+ * This board's DRAM mis-samples address line A7 during writes when the address
+ * pins are driven the way the vendor FSBL (Xilinx's default) sets them:
+ * 0x0018c61c = drive P/N 0x1c/0x0c, slew P/N 3/3.  A 16-byte burst then lands
+ * 0x100 bytes away.  The board wants gentler edges.  Measured with
+ * tools/ddr-sweep.sh and two-core tools/memtest.sh runs (lost-write errors):
+ *
+ *   slew (drive 0x1c):  3 -> 128   1 -> 24   0 -> 0   6 -> board dies
+ *   drive (slew 0):     0x0e dies, 0x11 -> 312, 0x13..0x1e -> 0, 0x20+ dies
+ *
+ * So: slowest slew, and drive in the middle of its clean window.
+ */
+&slcr {
+	pmp,ddriob-drive-slew-addr = <0x00000518>;	/* drive P/N 0x18/0x0a, slew 0/0 */
+	/* Data and strobe pins: Xilinx's default 0x00f9861c has slew N=31, the
+	 * fastest setting.  6/6 is under test (2026-09-23) against the CPU
+	 * executing garbage under ADC DMA + USB DMA; see "Known issues". */
+	pmp,ddriob-drive-slew-data = <0x0004861c>;	/* drive P/N 0x1c/0x0c, slew 6/6 */
+	pmp,ddriob-drive-slew-diff = <0x0004861c>;
+};
+
+&clkc {
+	ps-clk-frequency = <33333333>;
+	fclk-enable = <0xf>;
+};
+
+&uart1 {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&watchdog0 {
+	status = "okay";
+	reset-on-timeout;
+	timeout-sec = <30>;
+};
+
+&usb0 {
+	status = "okay";
+	dr_mode = "peripheral";
+	/* "phys", not the "usb-phy" the mainline Zynq boards use: chipidea
+	 * only defers its probe for a PHY named this way.  With "usb-phy" it
+	 * falls back to a lookup by type that returns -ENODEV if the PHY has
+	 * not probed yet, and the controller silently never binds. */
+	phys = <&usb_phy0>;
+};
+
+&spi0 {
+	status = "okay";
+
+	/* EMIO GPIOs (base 54): 66 = EN_AGC, 67 = RESETB */
+	ad936x: transceiver@0 {
+		compatible = "adi,ad9363a";
+		reg = <0>;
+		spi-cpha;
+		spi-max-frequency = <10000000>;
+		clocks = <&ad936x_refclk>;
+	};
+};
+
+&qspi {
+	status = "okay";
+	num-cs = <1>;
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		/* Single-bit I/O on purpose: quad reads need the flash's
+		 * non-volatile Quad Enable bit, and Linux should never have a
+		 * reason to write this chip's status registers. */
+		spi-tx-bus-width = <1>;
+		spi-rx-bus-width = <1>;
+		spi-max-frequency = <50000000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/* The bootloader is the restore path.  Linux never
+			 * writes it; firmware updates go through U-Boot DFU. */
+			partition@0 {
+				label = "qspi-fsbl-uboot";
+				reg = <0x0 0x100000>;
+				read-only;
+			};
+			partition@100000 {
+				label = "qspi-uboot-env";
+				reg = <0x100000 0x20000>;
+				read-only;
+			};
+			partition@120000 {
+				label = "qspi-nvmfs";
+				reg = <0x120000 0xe0000>;
+			};
+			partition@200000 {
+				label = "qspi-linux";
+				reg = <0x200000 0x1e00000>;
+				read-only;
+			};
+		};
+	};
+};

@@ -1,0 +1,14 @@
+[package]
+name = "sdrd"
+version = "0.1.0"
+edition = "2021"
+description = "pimpmypluto radio daemon: AD936x control, sample datapath, USB function"
+
+[dependencies]
+libc = "0.2"
+pmp-proto = { path = "../pmp-proto" }
+pmp-convert = { path = "../pmp-convert" }
+
+[build-dependencies]
+cc = "1"
+bindgen = "0.72"

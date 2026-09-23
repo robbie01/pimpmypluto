@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["crates/pmp-proto", "crates/pmp-convert", "crates/sdrd", "crates/pmpstream", "crates/pmp-cli"]
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+panic = "abort"
+strip = true

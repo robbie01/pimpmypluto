@@ -1,0 +1,21 @@
+--- a/drivers/usb/chipidea/udc.c	2026-09-19 21:17:05
++++ b/drivers/usb/chipidea/udc.c	2026-09-19 21:17:05
+@@ -2280,7 +2280,17 @@
+ 	ci->gadget.max_speed    = USB_SPEED_HIGH;
+ 	ci->gadget.name         = ci->platdata->name;
+ 	ci->gadget.otg_caps	= otg_caps;
+-	ci->gadget.sg_supported = 1;
++	/*
++	 * pimpmypluto: do not advertise scatter-gather.  FunctionFS uses it for
++	 * every transfer above a page, building lists from vmalloc pages whose
++	 * contiguous runs it merges into segments of hundreds of KiB.  DMA-API
++	 * debug flags each one ("mapping sg segment longer than device claims
++	 * to support [len=421888] [max=65536]").  Whether that path actually
++	 * misbehaves on the Zynq was never established; it was removed as a
++	 * suspect while chasing memory corruption, and is left off because the
++	 * contiguous-buffer path is the better-trodden one.
++	 */
++	ci->gadget.sg_supported = 0;
+ 	ci->gadget.irq		= ci->irq;
+ 
+ 	if (ci->platdata->flags & CI_HDRC_REQUIRES_ALIGNED_DMA)

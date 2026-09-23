@@ -1,0 +1,41 @@
+--- a/arch/arm/Kconfig	2026-09-20 01:11:22
++++ b/arch/arm/Kconfig	2026-09-20 01:11:22
+@@ -720,6 +720,24 @@
+ 	  register, thus disabling hit-under-miss without putting the
+ 	  processor into full low interrupt latency mode. ARM11MPCore
+ 	  is not affected.
++
++config ARM_ERRATA_845369
++	bool "ARM errata: streaming-mode transition may corrupt data (Cortex-A9 MPCore)"
++	depends on CPU_V7 && SMP
++	help
++	  This option enables the workaround for erratum 845369, which affects
++	  all revisions of the Cortex-A9 MPCore with two or more processors
++	  (or one processor and ACP).  Under rare timing circumstances the
++	  transition of a core into write-streaming mode -- sequential
++	  full-cache-line writes, i.e. any memset or memcpy -- can lose the
++	  line: memory silently keeps its previous contents.
++
++	  The workaround sets bit 22 of the CP15 diagnostic register on every
++	  core, which disables the optimisation.  The register is writable
++	  only in secure state, so normally this is the boot firmware's job;
++	  select this only for platforms whose kernel runs secure and whose
++	  firmware does not do it for every core (e.g. Zynq-7000, where Linux
++	  itself starts CPU1).
+ 
+ config ARM_ERRATA_764369
+ 	bool "ARM errata: Data cache line maintenance operation by MVA may not succeed"
+--- a/arch/arm/mm/proc-v7.S	2026-09-20 01:11:22
++++ b/arch/arm/mm/proc-v7.S	2026-09-20 01:11:22
+@@ -369,6 +369,11 @@
+ 	orreq	r0, r0, #1 << 6			@ set bit #6
+ 	mcreq	p15, 0, r0, c15, c0, 1		@ write diagnostic register
+ #endif
++#ifdef CONFIG_ARM_ERRATA_845369
++	mrc	p15, 0, r0, c15, c0, 1		@ read diagnostic register
++	orr	r0, r0, #1 << 22		@ set bit #22: no write streaming
++	mcr	p15, 0, r0, c15, c0, 1		@ write diagnostic register
++#endif
+ #if defined(CONFIG_ARM_ERRATA_751472) && defined(CONFIG_SMP)
+ 	ALT_SMP(cmp r6, #0x30)			@ present prior to r3p0
+ 	ALT_UP_B(1f)

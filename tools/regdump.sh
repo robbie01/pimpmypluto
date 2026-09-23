@@ -1,0 +1,9 @@
+#!/bin/sh
+# Dump the axi_ad9361 ADC/DAC core registers that define the sample framing.
+# Runs on the device (needs busybox devmem); used to diff our setup against
+# what ADI's kernel driver programs on the same bitstream.
+for base in 0x79020000 0x79024000; do
+    for off in 0x40 0x44 0x48 0x4c 0x50 0x54 0x58 0x5c 0xbc 0xc0 0x400 0x404 0x408 0x40c 0x410 0x414 0x418 0x41c 0x440 0x458 0x480 0x498 0x4c0 0x4d8; do
+        printf '%s+%s %s\n' $base $off "$(devmem $((base + off)) 32)"
+    done
+done

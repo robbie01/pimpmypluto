@@ -1,0 +1,14 @@
+#!/bin/sh
+# zig cc as a drop-in armv7 musl cross compiler/linker for cargo and cc-rs.
+# rustc passes a --target of its own spelling and a few GNU ld-isms zig's
+# driver rejects; drop those.
+for a in "$@"; do
+    shift
+    case "$a" in
+        --target=*|-target) continue ;;
+        armv7-unknown-linux-musleabihf) continue ;;
+        -Wl,--no-undefined-version|-Wl,-znostart-stop-gc) continue ;;
+    esac
+    set -- "$@" "$a"
+done
+exec zig cc -target arm-linux-musleabihf -mcpu=cortex_a9 "$@"

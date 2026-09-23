@@ -1,0 +1,12 @@
+build/
+__pycache__/
+*.pyc
+.DS_Store
+vendor/stock/
+os/kernel/pmpstream/*.o
+os/kernel/pmpstream/*.ko
+os/kernel/pmpstream/*.mod*
+os/kernel/pmpstream/.*
+os/kernel/pmpstream/Module.symvers
+os/kernel/pmpstream/modules.order
+target/
