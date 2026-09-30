@@ -2,6 +2,8 @@
 name = "pmp-cli"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 description = "Command-line front end for pimpmypluto radios"
 
 [[bin]]

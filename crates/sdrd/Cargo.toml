@@ -2,6 +2,8 @@
 name = "sdrd"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
 description = "pimpmypluto radio daemon: AD936x control, sample datapath, USB function"
 
 [dependencies]

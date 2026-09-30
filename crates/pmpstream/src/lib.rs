@@ -9,7 +9,7 @@
 //!                 Format::Ci8, 0, 0)?;
 //! let mut tx = radio.start_tx()?;
 //! tx.write_all(&[0u8; 8192])?;          // interleaved int8 I,Q
-//! # Ok::<(), pmpstream::Error>(())
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! Pure Rust (nusb): nothing to install on macOS or Linux.  The protocol is

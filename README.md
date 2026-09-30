@@ -34,3 +34,17 @@ tools/ramboot.sh build/rescue.itb && tools/lastlog.py
 | `crates/pmpstream`, `pmp-cli` | host library (nusb) and the `pmp` command |
 | `third_party/no-OS` | the subset of ADI's no-OS we link, unmodified |
 | `tools/` | RAM boot, post-mortem log reader, soak test, two-minute memory test (`memtest.sh`), DDR pin sweep, register dump |
+
+## License
+
+pimpmypluto is free software under the GNU Affero General Public License,
+version 3 or later — see [LICENSE](LICENSE).
+
+Parts that must carry other terms keep them:
+
+| | |
+|---|---|
+| `os/kernel/pmpstream`, `os/kernel/pmpstream-rs`, `os/kernel/a9reg`, `os/kernel/patches` | Linux kernel modules and patches: GPL-2.0 (`MODULE_LICENSE("GPL")`) |
+| `os/kernel/hostshim/elf.h` | musl's `elf.h`, MIT |
+| `third_party/no-OS` | ADI's no-OS driver, unmodified, under its own licences (see the `LICENSE*` files there) |
+| `vendor/tezuka-nano` | reference copies from F5OEO's tezuka_fw / maia-sdr, under their licences |

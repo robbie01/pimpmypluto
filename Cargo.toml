@@ -2,6 +2,10 @@
 resolver = "2"
 members = ["crates/pmp-proto", "crates/pmp-convert", "crates/sdrd", "crates/pmpstream", "crates/pmp-cli"]
 
+[workspace.package]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/robbie01/pimpmypluto"
+
 [profile.release]
 opt-level = 2
 lto = "thin"
