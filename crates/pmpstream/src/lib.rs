@@ -215,7 +215,8 @@ impl Radio {
 
     fn open_rx(&self) -> Result<RxStream, Error> {
         use std::io::Read;
-        let mut r = self.interface.endpoint::<Bulk, In>(self.ep_in).map_err(usb)?.reader(TRANSFER_SIZE).with_num_transfers(4);
+        // 16 transfers in flight: ~150 ms of samples at 6.9 MS/s ci16, so a reader thread that the OS holds off for a while does not overrun
+        let mut r = self.interface.endpoint::<Bulk, In>(self.ep_in).map_err(usb)?.reader(TRANSFER_SIZE).with_num_transfers(16);
         let mut scratch = vec![0u8; 64 * 1024];
         // Without a deadline a device that accepted START but cannot stream
         // leaves the caller waiting here for ever.

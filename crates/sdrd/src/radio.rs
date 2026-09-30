@@ -22,6 +22,13 @@ fn ck(what: &'static str, rc: i32) -> Result<(), Error> {
     if rc < 0 { Err(Error(what, rc)) } else { Ok(()) }
 }
 
+/// The driver's clk_set_rate() drops the error from a refused frequency and
+/// leaves the synthesizer where it was, so success is what the read-back says.
+fn tuned(what: &'static str, asked: u64, got: u64) -> Result<u64, Error> {
+    const EINVAL: i32 = 22;
+    if asked.abs_diff(got) > 16 { Err(Error(what, -EINVAL)) } else { Ok(got) }
+}
+
 pub struct Radio {
     phy: *mut ad9361_rf_phy,
 }
@@ -35,7 +42,11 @@ impl Radio {
     pub fn new() -> Result<Self, Error> {
         // SAFETY: returns a pointer to a static initialised at load time.
         let p = unsafe { &mut *pmp_default_init_param() };
-        p.dev_sel = dev_id_ID_AD9363A;
+        // The part is an AD9363, which ADI specifies for 325 MHz..3.8 GHz.  The
+        // silicon is the AD9361 family's and tunes 70 MHz..6 GHz; selecting
+        // AD9364 (the 1R1T sibling) changes nothing in the driver but its range
+        // checks.  Outside the AD9363's range performance is not guaranteed.
+        p.dev_sel = dev_id_ID_AD9364;
         p.reference_clk_rate = 40_000_000;
         p.xo_disable_use_ext_refclk_enable = 1;
         p.two_rx_two_tx_mode_enable = 0;
@@ -115,7 +126,7 @@ impl Radio {
             ck("set_tx_lo_freq", ad9361_set_tx_lo_freq(self.phy, hz))?;
             ck("get_tx_lo_freq", ad9361_get_tx_lo_freq(self.phy, &mut got))?;
         }
-        Ok(got)
+        tuned("set_tx_lo_freq", hz, got)
     }
 
     pub fn set_rx_lo(&mut self, hz: u64) -> Result<u64, Error> {
@@ -124,7 +135,7 @@ impl Radio {
             ck("set_rx_lo_freq", ad9361_set_rx_lo_freq(self.phy, hz))?;
             ck("get_rx_lo_freq", ad9361_get_rx_lo_freq(self.phy, &mut got))?;
         }
-        Ok(got)
+        tuned("set_rx_lo_freq", hz, got)
     }
 
     pub fn set_tx_bandwidth(&mut self, hz: u32) -> Result<(), Error> {
