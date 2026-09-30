@@ -17,7 +17,9 @@ whatever *is* in flash.
 ## The backup
 
 `~/pluto-backup-20260919/` holds a byte-exact dump of the whole 32 MB flash,
-taken from the running stock firmware and MD5-verified against the device:
+taken from the running stock firmware and MD5-verified against the device
+(`tools/extract-stock.sh --board` makes one of these, then unpacks the
+firmware FIT into `vendor/stock` for the build):
 
 | file | flash range | contents |
 |---|---|---|

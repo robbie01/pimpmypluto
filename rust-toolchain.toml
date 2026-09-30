@@ -1,0 +1,7 @@
+# The version everything here was last built and tested with.  The kernel's
+# Rust support (os/kernel/rust.config, PMP_RUST=1) is the part that is picky
+# about the exact toolchain; the crates build on any recent stable.
+[toolchain]
+channel = "1.98.1"
+components = ["rust-src", "rustfmt"]
+targets = ["armv7-unknown-linux-musleabihf"]
